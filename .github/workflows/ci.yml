@@ -1,0 +1,19 @@
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: shakedbashan/simple-java-maven-app
+
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t simple-java-maven-app .
