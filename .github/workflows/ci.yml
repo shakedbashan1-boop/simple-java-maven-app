@@ -90,5 +90,4 @@ jobs:
 
       - run: |
           docker tag simple-java-maven-app:${{ needs.prepare-version.outputs.next_version }} $REGISTRY/${{ github.repository }}:${{ needs.prepare-version.outputs.next_version }}
-
           docker push $REGISTRY/${{ github.repository }}:${{ needs.prepare-version.outputs.next_version }}
