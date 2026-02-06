@@ -1,19 +1,52 @@
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: shakedbashan/simple-java-maven-app
-
-name: CI
+name: CI Pipeline
 
 on:
   push:
     branches: [ "main" ]
 
+env:
+  REGISTRY: ghcr.io
+
+permissions:
+  contents: write
+  packages: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
+      
+      - name: Bump patch version in pom.xml
+        run: |
+          CURRENT_VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"    #internal field separator based on .
+          PATCH=$((PATCH + 1))
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
 
+          mvn versions:set -DnewVersion=$NEW_VERSION
+          mvn versions:commit
+
+          echo "VERSION=$NEW_VERSION" >> $GITHUB_ENV
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "bump patch version to $VERSION"
+          git push origin HEAD:main
+
+      - name: Build (with Maven, run tests)
+        run: mvn clean package
+        
       - name: Build Docker image
-        run: docker build -t simple-java-maven-app .
+        run: docker build -t simple-java-maven-app:$VERSION .
+
+      - name: Log in to GHCR
+        run: "echo ${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Tag and push Docker image to GHCR
+        run: |
+          docker tag simple-java-maven-app:$VERSION $REGISTRY/${{ github.repository }}:$VERSION
+          docker push $REGISTRY/${{ github.repository }}:$VERSION
