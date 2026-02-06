@@ -12,10 +12,10 @@ permissions:
   packages: write
 
 jobs:
-  version:
+  prepare-version:
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.bump.outputs.version }}
+      next_version: ${{ steps.calc.outputs.version }}
 
     steps:
       - name: Checkout
@@ -29,36 +29,23 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Bump patch version in pom.xml
-        id: bump
+      - name: Calculate next patch version (NO COMMIT)
+        id: calc
         run: |
           CURRENT_VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
           PATCH=$((PATCH + 1))
-          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          NEXT_VERSION="$MAJOR.$MINOR.$PATCH"
 
-          mvn versions:set -DnewVersion=$NEW_VERSION
-          mvn versions:commit
-
-          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
-
-      - name: Commit and push version bump
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -am "bump patch version to ${{ steps.bump.outputs.version }}"
-          git push origin master
+          echo "version=$NEXT_VERSION" >> $GITHUB_OUTPUT
 
   build:
     runs-on: ubuntu-latest
-    needs: version
+    needs: prepare-version
 
     steps:
-      - name: Checkout UPDATED master
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: master
-          fetch-depth: 0
 
       - name: Set up JDK 21
         uses: actions/setup-java@v3
@@ -66,22 +53,22 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Build with Maven (run tests)
-        run: mvn clean package
+      - name: Build and test with Maven (using computed version)
+        run: |
+          mvn clean package -Drevision=${{ needs.prepare-version.outputs.next_version }}
 
   docker:
     runs-on: ubuntu-latest
-    needs: version
+    needs: prepare-version
 
     steps:
-      - name: Checkout UPDATED master
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: master
-          fetch-depth: 0
 
       - name: Build Docker image
-        run: docker build -t simple-java-maven-app:${{ needs.version.outputs.version }} .
+        run: |
+          docker build \
+            -t simple-java-maven-app:${{ needs.prepare-version.outputs.next_version }} .
 
       - name: Log in to GHCR
         run: |
@@ -90,6 +77,35 @@ jobs:
 
       - name: Tag and push Docker image
         run: |
-          docker tag simple-java-maven-app:${{ needs.version.outputs.version }} \
-            $REGISTRY/${{ github.repository }}:${{ needs.version.outputs.version }}
-          docker push $REGISTRY/${{ github.repository }}:${{ needs.version.outputs.version }}
+          docker tag simple-java-maven-app:${{ needs.prepare-version.outputs.next_version }} \
+            $REGISTRY/${{ github.repository }}:${{ needs.prepare-version.outputs.next_version }}
+          docker push $REGISTRY/${{ github.repository }}:${{ needs.prepare-version.outputs.next_version }}
+
+  commit-version:
+    runs-on: ubuntu-latest
+    needs: [build, docker]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Apply version bump to pom.xml
+        run: |
+          mvn versions:set \
+            -DnewVersion=${{ needs.prepare-version.outputs.next_version }}
+          mvn versions:commit
+
+      - name: Commit and push version bump (FINAL STEP)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "bump patch version to ${{ needs.prepare-version.outputs.next_version }}"
+          git push origin master
