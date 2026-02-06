@@ -53,9 +53,8 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Build and test with Maven (using computed version)
-        run: |
-          mvn clean package -Drevision=${{ needs.prepare-version.outputs.next_version }}
+      - name: Build and test with Maven
+        run: mvn clean package
 
   docker:
     runs-on: ubuntu-latest
@@ -70,7 +69,7 @@ jobs:
           docker build \
             -t simple-java-maven-app:${{ needs.prepare-version.outputs.next_version }} .
 
-      - name: Log in to GHCR
+      - name: Log in to GitHub Container Registry
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io \
             -u ${{ github.actor }} --password-stdin
@@ -97,15 +96,19 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Apply version bump to pom.xml
+      - name: Update pom.xml to released version
         run: |
           mvn versions:set \
-            -DnewVersion=${{ needs.prepare-version.outputs.next_version }}
-          mvn versions:commit
+            -DnewVersion=${{ needs.prepare-version.outputs.next_version }} \
+            -DgenerateBackupPoms=false
+
+      - name: Show version diff (proof)
+        run: git diff
 
       - name: Commit and push version bump (FINAL STEP)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -am "bump patch version to ${{ needs.prepare-version.outputs.next_version }}"
+          git add pom.xml
+          git commit -m "bump patch version to ${{ needs.prepare-version.outputs.next_version }}"
           git push origin master
