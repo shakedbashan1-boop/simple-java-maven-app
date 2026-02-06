@@ -15,10 +15,10 @@ jobs:
   prepare-version:
     runs-on: ubuntu-latest
     outputs:
-      next_version: ${{ steps.calc.outputs.version }}
+      next_version: ${{ steps.bump.outputs.version }}
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -29,13 +29,24 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Calculate next patch version (NO COMMIT)
-        id: calc
+      - name: Bump patch version and commit
+        id: bump
         run: |
           CURRENT_VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
           PATCH=$((PATCH + 1))
           NEXT_VERSION="$MAJOR.$MINOR.$PATCH"
+
+          mvn versions:set \
+            -DnewVersion=$NEXT_VERSION \
+            -DgenerateBackupPoms=false
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pom.xml
+          git commit -m "bump patch version to $NEXT_VERSION [skip ci]"
+          git push origin master
 
           echo "version=$NEXT_VERSION" >> $GITHUB_OUTPUT
 
@@ -51,7 +62,7 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Build and test
+      - name: Build and test with Maven
         run: mvn clean package
 
   docker:
@@ -71,42 +82,9 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io \
             -u ${{ github.actor }} --password-stdin
 
-      - name: Push Docker image
+      - name: Tag and push Docker image
         run: |
           docker tag simple-java-maven-app:${{ needs.prepare-version.outputs.next_version }} \
             $REGISTRY/${{ github.repository }}:${{ needs.prepare-version.outputs.next_version }}
+
           docker push $REGISTRY/${{ github.repository }}:${{ needs.prepare-version.outputs.next_version }}
-
-  commit-version:
-    runs-on: ubuntu-latest
-    needs: [build, docker]
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-java@v3
-        with:
-          distribution: temurin
-          java-version: "21"
-
-      - name: Apply version bump to pom.xml
-        run: |
-          mvn versions:set \
-            -DnewVersion=${{ needs.prepare-version.outputs.next_version }} \
-            -DgenerateBackupPoms=false
-
-      - name: Commit version bump IF NEEDED
-        run: |
-          if git diff --quiet; then
-            echo "No version change needed. Skipping commit."
-            exit 0
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add pom.xml
-          git commit -m "bump patch version to ${{ needs.prepare-version.outputs.next_version }}"
-          git push origin master
