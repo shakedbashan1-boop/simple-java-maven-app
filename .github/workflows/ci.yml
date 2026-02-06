@@ -83,15 +83,12 @@ jobs:
         run: git pull origin master
 
       - run: |
-          docker build \
-            -t simple-java-maven-app:${{ needs.prepare-version.outputs.next_version }} .
+          docker build -t simple-java-maven-app:${{ needs.prepare-version.outputs.next_version }} .
 
       - run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io \
-            -u ${{ github.actor }} --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
       - run: |
-          docker tag simple-java-maven-app:${{ needs.prepare-version.outputs.next_version }} \
-            $REGISTRY/${{ github.repository }}:${{ needs.prepare-version.outputs.next_version }}
+          docker tag simple-java-maven-app:${{ needs.prepare-version.outputs.next_version }} $REGISTRY/${{ github.repository }}:${{ needs.prepare-version.outputs.next_version }}
 
           docker push $REGISTRY/${{ github.repository }}:${{ needs.prepare-version.outputs.next_version }}
