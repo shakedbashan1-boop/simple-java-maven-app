@@ -13,81 +13,93 @@ permissions:
   packages: write
 
 jobs:
-  prepare-version:
+  ######################## 1. Test ########################
+  test:
     runs-on: ubuntu-latest
-    outputs:
-      next_version: ${{ steps.bump.outputs.version }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Run tests
+        run: mvn test
+
+  ######################## 2. Build jar ########################
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Build JAR
+        run: mvn clean package
+
+  ######################## 3. Docker image ########################
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image (CI)
+        run: docker build -t simple-java-maven-app:ci .
+
+  ######################## 4. Version bump (if stages 2 and 3 are done) ########################
+  bump-version:
+    runs-on: ubuntu-latest
+    needs: [build, docker]
+
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-java@v3
+      - name: Set up Java
+        uses: actions/setup-java@v3
         with:
           distribution: temurin
           java-version: "21"
 
       - name: Bump patch version
-        id: bump
-        if: github.actor != 'github-actions[bot]'
         run: |
           CURRENT_VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
           PATCH=$((PATCH + 1))
-          NEXT_VERSION="$MAJOR.$MINOR.$PATCH"
+          VERSION="$MAJOR.$MINOR.$PATCH"
 
-          mvn versions:set -DnewVersion=$NEXT_VERSION -DgenerateBackupPoms=false
+          mvn versions:set -DnewVersion=$VERSION -DgenerateBackupPoms=false
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
           git add pom.xml
-          git commit -m "bump patch version to $NEXT_VERSION [skip ci]"
+          git commit -m "release: bump version to $VERSION"
           git push origin master
 
-          echo "version=$NEXT_VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
 
-  build:
-    runs-on: ubuntu-latest
-    needs: prepare-version
-    if: needs.prepare-version.outputs.next_version != ''
+      - name: Build & push Docker image (release)
+        run: |
+          docker build -t simple-java-maven-app:${{ env.VERSION }} .
 
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: master
-          fetch-depth: 0
-
-      - name: Pull latest changes
-        run: git pull origin master
-
-      - uses: actions/setup-java@v3
-        with:
-          distribution: temurin
-          java-version: "21"
-
-      - run: mvn clean package
-
-  docker:
-    runs-on: ubuntu-latest
-    needs: prepare-version
-    if: needs.prepare-version.outputs.next_version != ''
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: master
-          fetch-depth: 0
-
-      - name: Pull latest changes
-        run: git pull origin master
-
-      - run: |
-          docker build -t simple-java-maven-app:${{ needs.prepare-version.outputs.next_version }} .
-
-      - run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-      - run: |
-          docker tag simple-java-maven-app:${{ needs.prepare-version.outputs.next_version }} $REGISTRY/${{ github.repository }}:${{ needs.prepare-version.outputs.next_version }}
-          docker push $REGISTRY/${{ github.repository }}:${{ needs.prepare-version.outputs.next_version }}
+          docker tag simple-java-maven-app:${{ env.VERSION }} $REGISTRY/${{ github.repository }}:${{ env.VERSION }}
+          docker push $REGISTRY/${{ github.repository }}:${{ env.VERSION }}
