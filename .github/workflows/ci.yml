@@ -41,7 +41,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git commit -am "bump patch version to $VERSION"
-          git push origin HEAD:main
+          git push origin HEAD:master
 
       - name: Build (with Maven, run tests)
         run: mvn clean package
